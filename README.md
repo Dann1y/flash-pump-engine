@@ -1,6 +1,6 @@
 # Flash Pump Engine
 
-> X.com(Twitter)에서 실시간 트렌드를 감지하고, 밈코인화 가능성이 높은 트렌드를 AI로 스코어링한 뒤, pump.fun에 토큰을 자동 발행하고, 분할 매도로 수익을 실현하는 End-to-End 자동화 파이프라인
+> End-to-end automation pipeline that detects real-time trends from X.com (Twitter), scores meme coin potential with AI, auto-launches tokens on pump.fun, and realizes profit through staged sells.
 
 ## Architecture
 
