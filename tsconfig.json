@@ -1,7 +1,8 @@
 {
   "references": [
     { "path": "packages/shared" },
-    { "path": "packages/token-launcher" }
+    { "path": "packages/token-launcher" },
+    { "path": "packages/exit-manager" }
   ],
   "files": []
 }
