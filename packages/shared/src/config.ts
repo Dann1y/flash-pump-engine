@@ -15,10 +15,10 @@ const envSchema = z.object({
   ANTHROPIC_API_KEY: z.string().startsWith("sk-ant-"),
   OPENAI_API_KEY: z.string().startsWith("sk-"),
 
-  // X.com
-  X_API_BEARER_TOKEN: z.string().min(1),
-  X_USERNAME: z.string().optional(),
-  X_PASSWORD: z.string().optional(),
+  // X.com (Playwright scraping)
+  X_USERNAME: z.string().min(1),
+  X_PASSWORD: z.string().min(1),
+  FXTWITTER_API_BASE: z.string().url().default("https://api.fxtwitter.com"),
 
   // Database
   DATABASE_URL: z.string().url(),

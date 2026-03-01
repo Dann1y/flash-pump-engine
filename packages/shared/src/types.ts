@@ -42,6 +42,33 @@ export interface TrendScoreResult {
   suggestedTicker: string;
 }
 
+/** Reference to a specific tweet for fxtwitter enrichment */
+export interface TweetRef {
+  tweetId: string;
+  screenName: string;
+}
+
+/** Enriched tweet data from fxtwitter API */
+export interface EnrichedTweet {
+  text: string;
+  likes: number;
+  retweets: number;
+  views: number;
+  authorFollowers: number;
+  hasMedia: boolean;
+  createdAt: string;
+}
+
+/** Context passed to the scorer after fxtwitter enrichment */
+export interface ScorerContext {
+  keyword: string;
+  sampleTweets: EnrichedTweet[];
+  totalMentions: number;
+  avgEngagement: number;
+  topTweetViews: number;
+  hasImagesOrMemes: boolean;
+}
+
 /** Wallet info for pool management */
 export interface WalletInfo {
   address: string;

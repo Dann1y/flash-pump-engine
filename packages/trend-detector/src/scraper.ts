@@ -1,13 +1,16 @@
-import { createLogger, getEnv } from "@flash-pump/shared";
+import { execFile } from "node:child_process";
+import path from "node:path";
+import { createLogger, type TweetRef } from "@flash-pump/shared";
 import { withRetry } from "./retry";
-import { X_API_BASE_URL, X_SEARCH_QUERY, MAX_TRENDS_PER_TICK } from "./constants";
+import { MAX_TRENDS_PER_TICK } from "./constants";
 
 const log = createLogger("scraper");
 
-/** Raw trend extracted from X API response */
+/** Raw trend extracted from Playwright scraping */
 export interface RawTrend {
   keyword: string;
   detectedAt: Date;
+  tweetRefs: TweetRef[];
   context: {
     tweetCount: number;
     sampleTweets: string[];
@@ -16,124 +19,91 @@ export interface RawTrend {
   };
 }
 
-/** X API v2 Recent Search response shape */
-interface XSearchResponse {
-  data?: Array<{
-    id: string;
-    text: string;
-    created_at?: string;
-    public_metrics?: {
-      retweet_count: number;
-      reply_count: number;
-      like_count: number;
-      quote_count: number;
-    };
-    entities?: {
-      hashtags?: Array<{ tag: string }>;
-      urls?: Array<{ expanded_url: string; images?: Array<{ url: string }> }>;
-    };
+/** JSON shape emitted by the Python Playwright scraper */
+interface ScraperOutput {
+  trends: Array<{
+    keyword: string;
+    tweet_count: number;
+    sample_tweets: string[];
+    image_urls: string[];
+    mention_count: number;
+    tweet_refs: Array<{ tweet_id: string; screen_name: string }>;
   }>;
-  includes?: {
-    media?: Array<{ url?: string; preview_image_url?: string }>;
-  };
-  meta?: {
-    newest_id?: string;
-    oldest_id?: string;
-    result_count?: number;
-  };
 }
 
-/** Extract trending keywords from tweets by frequency of hashtags and notable terms */
-function extractKeywords(response: XSearchResponse): RawTrend[] {
-  if (!response.data || response.data.length === 0) {
-    return [];
-  }
+/** Spawn the Python Playwright scraper and parse its JSON stdout */
+function runPythonScraper(): Promise<ScraperOutput> {
+  return new Promise((resolve, reject) => {
+    const scriptPath = path.resolve(
+      __dirname,
+      "../../../../python/x-scraper/scraper.py",
+    );
 
-  // Count hashtag frequency
-  const tagCounts = new Map<string, { count: number; tweets: string[]; images: string[] }>();
+    log.debug({ scriptPath }, "Spawning Python scraper");
 
-  for (const tweet of response.data) {
-    const hashtags = tweet.entities?.hashtags ?? [];
-    const imageUrls: string[] = [];
+    const child = execFile(
+      "python3",
+      [scriptPath, "--json"],
+      { timeout: 120_000, maxBuffer: 10 * 1024 * 1024 },
+      (error, stdout, stderr) => {
+        if (error) {
+          log.error({ error: error.message, stderr }, "Python scraper failed");
+          return reject(error);
+        }
 
-    // Collect image URLs from entities
-    for (const urlEntity of tweet.entities?.urls ?? []) {
-      if (urlEntity.images) {
-        imageUrls.push(...urlEntity.images.map((img) => img.url));
-      }
-    }
+        if (stderr) {
+          log.debug({ stderr }, "Python scraper stderr");
+        }
 
-    for (const ht of hashtags) {
-      const tag = ht.tag.toLowerCase();
-      const existing = tagCounts.get(tag) ?? { count: 0, tweets: [], images: [] };
-      existing.count++;
-      if (existing.tweets.length < 3) {
-        existing.tweets.push(tweet.text.slice(0, 280));
-      }
-      existing.images.push(...imageUrls);
-      tagCounts.set(tag, existing);
-    }
-  }
-
-  // Sort by frequency, take top N
-  const sorted = [...tagCounts.entries()]
-    .sort((a, b) => b[1].count - a[1].count)
-    .slice(0, MAX_TRENDS_PER_TICK);
-
-  const now = new Date();
-
-  return sorted
-    .filter(([, data]) => data.count >= 2) // At least 2 mentions
-    .map(([keyword, data]) => ({
-      keyword,
-      detectedAt: now,
-      context: {
-        tweetCount: data.count,
-        sampleTweets: data.tweets,
-        imageUrls: [...new Set(data.images)],
-        mentionCount: data.count,
+        try {
+          const parsed = JSON.parse(stdout) as ScraperOutput;
+          resolve(parsed);
+        } catch (parseErr) {
+          reject(new Error(`Failed to parse scraper output: ${stdout.slice(0, 500)}`));
+        }
       },
-    }));
+    );
+
+    child.on("error", (err) => {
+      reject(new Error(`Failed to spawn Python scraper: ${err.message}`));
+    });
+  });
 }
 
-/** Fetch trending keywords from X API v2 Recent Search */
+/** Fetch trending keywords via Playwright scraping */
 export async function fetchTrendingKeywords(): Promise<RawTrend[]> {
   return withRetry(
     async () => {
-      const env = getEnv();
+      const output = await runPythonScraper();
 
-      const url = new URL(`${X_API_BASE_URL}/tweets/search/recent`);
-      url.searchParams.set("query", X_SEARCH_QUERY);
-      url.searchParams.set("max_results", "100");
-      url.searchParams.set("tweet.fields", "created_at,public_metrics,entities");
-      url.searchParams.set("expansions", "attachments.media_keys");
-      url.searchParams.set("media.fields", "url,preview_image_url");
-
-      log.debug({ url: url.toString() }, "Fetching X API Recent Search");
-
-      const res = await fetch(url.toString(), {
-        headers: {
-          Authorization: `Bearer ${env.X_API_BEARER_TOKEN}`,
-        },
-      });
-
-      if (res.status === 429) {
-        const resetAfter = res.headers.get("x-rate-limit-reset");
-        throw new Error(
-          `X API rate limited (429). Reset at: ${resetAfter ?? "unknown"}`,
-        );
+      if (!output.trends || output.trends.length === 0) {
+        log.info("No trends returned from scraper");
+        return [];
       }
 
-      if (!res.ok) {
-        throw new Error(`X API error: ${res.status} ${res.statusText}`);
-      }
+      const now = new Date();
 
-      const data = (await res.json()) as XSearchResponse;
-      const trends = extractKeywords(data);
+      const trends = output.trends
+        .slice(0, MAX_TRENDS_PER_TICK)
+        .filter((t) => t.tweet_count >= 2)
+        .map((t) => ({
+          keyword: t.keyword,
+          detectedAt: now,
+          tweetRefs: t.tweet_refs.map((ref) => ({
+            tweetId: ref.tweet_id,
+            screenName: ref.screen_name,
+          })),
+          context: {
+            tweetCount: t.tweet_count,
+            sampleTweets: t.sample_tweets,
+            imageUrls: t.image_urls,
+            mentionCount: t.mention_count,
+          },
+        }));
 
       log.info(
-        { resultCount: data.meta?.result_count ?? 0, trendCount: trends.length },
-        "Fetched trending keywords",
+        { trendCount: trends.length, totalRefs: trends.reduce((s, t) => s + t.tweetRefs.length, 0) },
+        "Fetched trending keywords via Playwright",
       );
 
       return trends;

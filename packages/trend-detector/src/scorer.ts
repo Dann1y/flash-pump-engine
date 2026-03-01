@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
-import { createLogger, getEnv, type TrendScoreResult } from "@flash-pump/shared";
+import { createLogger, getEnv, type TrendScoreResult, type ScorerContext, type EnrichedTweet } from "@flash-pump/shared";
 import { withRetry } from "./retry";
 
 const log = createLogger("scorer");
@@ -21,10 +21,22 @@ function getClient(): Anthropic {
   return client;
 }
 
+/** Format enriched tweets for the prompt */
+function formatTweets(ctx: ScorerContext): string {
+  if (ctx.sampleTweets.length === 0) return "No enriched tweets available.";
+
+  return ctx.sampleTweets
+    .slice(0, 5)
+    .map(
+      (t: EnrichedTweet, i: number) =>
+        `[${i + 1}] "${t.text.slice(0, 200)}" — ❤️${t.likes} 🔁${t.retweets} 👁${t.views} (author: ${t.authorFollowers} followers${t.hasMedia ? ", has media" : ""})`,
+    )
+    .join("\n");
+}
+
 /** Score a trend's meme-coin viability using Claude */
 export async function scoreTrend(
-  keyword: string,
-  context: Record<string, unknown>,
+  ctx: ScorerContext,
 ): Promise<TrendScoreResult> {
   return withRetry(
     async () => {
@@ -39,9 +51,16 @@ export async function scoreTrend(
 3. 토큰 네이밍 적합성 (짧고 캐치한 이름으로 변환 가능한지)
 4. 타이밍 (아직 초기인지, 이미 식은 트렌드인지)
 5. 이미지/밈 동반 여부 (비주얼 요소가 있으면 토큰 이미지 제작 용이)
+6. 소셜 견인력 (평균 인게이지먼트, 최다 조회수, 인플루언서 참여도)
 
-트렌드: "${keyword}"
-컨텍스트: ${JSON.stringify(context)}
+트렌드: "${ctx.keyword}"
+총 멘션 수: ${ctx.totalMentions}
+평균 인게이지먼트 (좋아요+RT): ${ctx.avgEngagement}
+최다 조회수 트윗: ${ctx.topTweetViews} views
+이미지/밈 동반: ${ctx.hasImagesOrMemes ? "있음" : "없음"}
+
+샘플 트윗:
+${formatTweets(ctx)}
 
 JSON으로 응답: {"score": 0.0~1.0, "reasoning": "한줄 이유", "suggested_name": "토큰명 제안", "suggested_ticker": "티커 제안"}`;
 
@@ -63,7 +82,7 @@ JSON으로 응답: {"score": 0.0~1.0, "reasoning": "한줄 이유", "suggested_n
       const parsed = ScoreResponseSchema.parse(JSON.parse(jsonMatch[0]));
 
       log.info(
-        { keyword, score: parsed.score, ticker: parsed.suggested_ticker },
+        { keyword: ctx.keyword, score: parsed.score, ticker: parsed.suggested_ticker },
         "Trend scored",
       );
 

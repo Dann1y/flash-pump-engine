@@ -19,4 +19,7 @@ export type {
   PositionSnapshot,
   TrendScoreResult,
   WalletInfo,
+  TweetRef,
+  EnrichedTweet,
+  ScorerContext,
 } from "./types";

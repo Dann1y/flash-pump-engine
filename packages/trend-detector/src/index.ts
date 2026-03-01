@@ -9,6 +9,7 @@ import {
   type LaunchSignal,
 } from "@flash-pump/shared";
 import { fetchTrendingKeywords } from "./scraper";
+import { enrichTrend } from "./enricher";
 import { scoreTrend } from "./scorer";
 import { applyFilters } from "./filter";
 import { initQueue, publishSignal, closeQueue } from "./publisher";
@@ -33,7 +34,7 @@ async function tick(): Promise<void> {
   const db = getDb();
   const threshold = env.TREND_SCORE_THRESHOLD;
 
-  // 1. Scrape trending keywords from X
+  // 1. Scrape trending keywords via Playwright
   log.info("Fetching trending keywords...");
   let rawTrends;
   try {
@@ -50,11 +51,14 @@ async function tick(): Promise<void> {
 
   log.info({ count: rawTrends.length }, "Raw trends fetched");
 
-  // 2. Score + filter + publish each trend
+  // 2. Enrich + Score + Filter + Publish each trend
   for (const raw of rawTrends) {
     try {
+      // Enrich tweet refs via fxtwitter API
+      const scorerCtx = await enrichTrend(raw.keyword, raw.tweetRefs);
+
       // Score with Claude AI
-      const scoreResult = await scoreTrend(raw.keyword, raw.context);
+      const scoreResult = await scoreTrend(scorerCtx);
 
       // Insert trend record into DB
       const status =
