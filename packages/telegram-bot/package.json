@@ -10,7 +10,8 @@
   "dependencies": {
     "@flash-pump/shared": "workspace:*",
     "drizzle-orm": "^0.39.3",
-    "grammy": "^1.35.0"
+    "grammy": "^1.35.0",
+    "ioredis": "^5.4.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
