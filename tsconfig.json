@@ -2,7 +2,8 @@
   "references": [
     { "path": "packages/shared" },
     { "path": "packages/token-launcher" },
-    { "path": "packages/exit-manager" }
+    { "path": "packages/exit-manager" },
+    { "path": "packages/trend-detector" }
   ],
   "files": []
 }
