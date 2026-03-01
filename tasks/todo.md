@@ -20,12 +20,13 @@
 - [x] `exit-engine.ts` — 3-stage exit evaluation (pure fn) + runMonitorTick orchestrator
 - [x] `index.ts` — Main loop: Redis sub, 5s polling, daily P&L, graceful shutdown
 
-## Phase 4 — Trend Detection
-- [ ] `scraper.ts` — X.com 데이터 수집
-- [ ] `scorer.ts` — Claude AI 스코어링
-- [ ] `filter.ts` — 중복/타이밍 필터
-- [ ] `publisher.ts` — BullMQ 큐 발행
-- [ ] `index.ts` — Trend Detector 메인 루프
+## Phase 4 — Trend Detection ✅
+- [x] Package scaffold — package.json, tsconfig.json, constants.ts, retry.ts
+- [x] `scraper.ts` — X API v2 Recent Search with keyword extraction
+- [x] `scorer.ts` — Claude AI meme-coin viability scoring (0.0–1.0)
+- [x] `filter.ts` — Duplicate check (DB 24h) + timing filter (>1h = skip)
+- [x] `publisher.ts` — BullMQ queue producer for launch signals
+- [x] `index.ts` — Main polling loop (30–60s random interval, graceful shutdown)
 
 ## Phase 5 — Telegram & Polish
 - [ ] `telegram-bot` — alerts + commands (/status, /pnl, /tokens, /pause, /resume)
