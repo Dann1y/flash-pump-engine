@@ -1,4 +1,7 @@
 {
-  "references": [{ "path": "packages/shared" }],
+  "references": [
+    { "path": "packages/shared" },
+    { "path": "packages/token-launcher" }
+  ],
   "files": []
 }
