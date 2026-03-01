@@ -28,7 +28,13 @@
 - [x] `publisher.ts` — BullMQ queue producer for launch signals
 - [x] `index.ts` — Main polling loop (30–60s random interval, graceful shutdown)
 
-## Phase 5 — Telegram & Polish
-- [ ] `telegram-bot` — alerts + commands (/status, /pnl, /tokens, /pause, /resume)
+## Phase 5 — Telegram Bot ✅
+- [x] Package scaffold — package.json, tsconfig.json, constants.ts
+- [x] `formatters.ts` — SOL/P&L/link formatting helpers
+- [x] `commands.ts` — /status, /pnl, /tokens, /pause, /resume, /config, /start
+- [x] `alerts.ts` — Redis subscription (4 channels), event alerts, daily report (midnight KST)
+- [x] `index.ts` — Bot init, command registration, alert start, graceful shutdown
+
+## Remaining
 - [ ] 전체 파이프라인 통합 테스트
 - [ ] Devnet 테스트 → Mainnet 배포
