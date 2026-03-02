@@ -36,7 +36,7 @@ function runPythonScraper(): Promise<ScraperOutput> {
   return new Promise((resolve, reject) => {
     const scriptPath = path.resolve(
       __dirname,
-      "../../../../python/x-scraper/scraper.py",
+      "../../../python/x-scraper/scraper.py",
     );
 
     log.debug({ scriptPath }, "Spawning Python scraper");
