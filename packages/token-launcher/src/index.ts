@@ -116,11 +116,14 @@ async function processLaunch(job: Job<LaunchSignal>): Promise<void> {
       .where(eq(tokens.id, tokenRecord.id));
 
     // 9. Record the initial buy trade
+    // In DRY_RUN mode, use a fake token amount (~1000 tokens at 6 decimals)
+    // so exit-manager can track the position (it skips positions with 0 tokens)
+    const buyTokenAmount = getEnv().DRY_RUN ? BigInt(1_000_000_000) : BigInt(0);
     await db.insert(trades).values({
       tokenId: tokenRecord.id,
       type: "buy",
       solAmount: initialBuySol,
-      tokenAmount: BigInt(0), // Updated by monitor after confirmation
+      tokenAmount: buyTokenAmount,
       wallet: wallet.address,
       txSignature: bundleResult.bundleId,
     });

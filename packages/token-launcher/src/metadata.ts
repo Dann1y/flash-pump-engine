@@ -22,6 +22,16 @@ function getClient(): Anthropic {
 
 /** Generate token metadata (name, ticker, description) using Claude */
 export async function generateMetadata(signal: LaunchSignal): Promise<TokenMetadata> {
+  if (getEnv().DRY_RUN) {
+    const metadata: TokenMetadata = {
+      name: signal.suggestedName || `${signal.keyword} Token`,
+      ticker: (signal.suggestedTicker || signal.keyword.slice(0, 6)).toUpperCase(),
+      description: `[DRY_RUN] Meme coin inspired by ${signal.keyword} 🚀🔥`,
+    };
+    log.info({ name: metadata.name, ticker: metadata.ticker }, "[DRY_RUN] Using signal-provided metadata");
+    return metadata;
+  }
+
   return withRetry(
     async () => {
       const anthropic = getClient();

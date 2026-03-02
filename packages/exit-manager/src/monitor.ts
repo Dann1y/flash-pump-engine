@@ -13,7 +13,8 @@ import { withRetry } from "./retry";
  *   3.5–5 min: 70% → 100% + complete=true (Stage 3 / Raydium migration)
  */
 const dryRunStartTimes = new Map<string, number>();
-const DRY_RUN_DURATION_MS = 5 * 60 * 1000; // 5 minutes total
+const DRY_RUN_DURATION_MS = 5 * 60 * 1000; // 5 minutes: 0% → 100%
+const DRY_RUN_DECLINE_MS = 1 * 60 * 1000;  // 1 minute post-peak decline (5–6 min)
 
 function getDryRunSnapshot(mintAddress: string): BondingCurveSnapshot {
   if (!dryRunStartTimes.has(mintAddress)) {
@@ -41,7 +42,18 @@ function getDryRunSnapshot(mintAddress: string): BondingCurveSnapshot {
 
   const vSol = Number(state.virtualSolReserves);
   const vToken = Number(state.virtualTokenReserves);
-  const pricePerToken = vToken > 0 ? vSol / vToken : 0;
+  let pricePerToken = vToken > 0 ? vSol / vToken : 0;
+
+  // After bonding curve completes (5 min), simulate price decline over the next
+  // 1 minute: peak → 50% of peak. This triggers the trailing stop for Stage 3.
+  if (complete) {
+    const postPeakElapsed = elapsed - DRY_RUN_DURATION_MS;
+    if (postPeakElapsed > 0) {
+      const declinePct = Math.min(postPeakElapsed / DRY_RUN_DECLINE_MS, 1);
+      // Drop to 50% of peak price (exceeds 30% trailing stop threshold)
+      pricePerToken = pricePerToken * (1 - declinePct * 0.5);
+    }
+  }
 
   return { mintAddress, state, bondingProgress: progress, pricePerToken };
 }

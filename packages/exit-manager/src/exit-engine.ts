@@ -279,10 +279,12 @@ export async function runMonitorTick(
   const redis = getRedis();
 
   // 1. Collect mint addresses for active (non-selling) positions
+  //    Also include uninitialized positions (entryPrice=0) so the DB-refresh
+  //    code below can populate remainingTokens on the first tick.
   const mintAddresses: string[] = [];
   const posArray: ActivePosition[] = [];
   for (const pos of positions.values()) {
-    if (pos.remainingTokens > BigInt(0) && !pos.selling) {
+    if (!pos.selling && (pos.remainingTokens > BigInt(0) || pos.entryPrice === 0)) {
       mintAddresses.push(pos.mintAddress);
       posArray.push(pos);
     }
