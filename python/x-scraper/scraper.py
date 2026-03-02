@@ -17,6 +17,8 @@ Outputs JSON to stdout matching the ScraperOutput interface:
 All logs go to stderr. Exit 0 on success, 1 on failure.
 """
 
+from __future__ import annotations
+
 import argparse
 import asyncio
 import json
