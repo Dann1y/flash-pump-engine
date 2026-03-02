@@ -37,6 +37,9 @@ const envSchema = z.object({
     "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
   ),
 
+  // Mode
+  DRY_RUN: z.coerce.boolean().default(false),
+
   // Config
   TREND_SCORE_THRESHOLD: z.coerce.number().min(0).max(1).default(0.7),
   INITIAL_BUY_SOL: z.coerce.number().positive().default(0.1),

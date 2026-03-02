@@ -5,7 +5,7 @@ import {
 } from "@solana/web3.js";
 import { mnemonicToSeedSync } from "bip39";
 import { derivePath } from "ed25519-hd-key";
-import { createLogger } from "@flash-pump/shared";
+import { createLogger, getEnv } from "@flash-pump/shared";
 import {
   PUMP_PORTAL_URL,
   HD_DERIVATION_BASE,
@@ -66,6 +66,16 @@ export async function executePumpSell(
   tokenAmount: bigint,
   connection: Connection,
 ): Promise<SellResult> {
+  if (getEnv().DRY_RUN) {
+    const txSignature = `dry-run-sell-pump-${Date.now()}`;
+    const solReceived = Number(tokenAmount) * 0.000000001; // fake estimate
+    log.info(
+      { txSignature, mintAddress, wallet: walletAddress, tokenAmount: tokenAmount.toString(), solReceived },
+      "[DRY_RUN] Skipping PumpPortal sell, returning fake tx",
+    );
+    return { txSignature, solReceived };
+  }
+
   const keypair = getKeypairForWallet(walletAddress);
 
   return withRetry(

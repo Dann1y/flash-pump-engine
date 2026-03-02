@@ -1,5 +1,5 @@
 import { Keypair } from "@solana/web3.js";
-import { createLogger } from "@flash-pump/shared";
+import { createLogger, getEnv } from "@flash-pump/shared";
 import { PUMP_PORTAL_URL, ANTI_DETECTION } from "./constants";
 import { withRetry } from "./retry";
 
@@ -39,6 +39,14 @@ export function randomizeBuyAmount(): number {
  */
 export async function buildDeployTransaction(req: DeployRequest): Promise<DeployResult> {
   const mintKeypair = Keypair.generate();
+
+  if (getEnv().DRY_RUN) {
+    log.info(
+      { name: req.name, ticker: req.ticker, mint: mintKeypair.publicKey.toBase58() },
+      "[DRY_RUN] Skipping PumpPortal create API, returning empty tx",
+    );
+    return { mintKeypair, createTxBase64: "" };
+  }
 
   return withRetry(
     async () => {

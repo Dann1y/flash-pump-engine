@@ -1,7 +1,50 @@
 import { Connection, PublicKey, type AccountInfo } from "@solana/web3.js";
-import { createLogger } from "@flash-pump/shared";
+import { createLogger, getEnv } from "@flash-pump/shared";
 import { PUMPFUN_PROGRAM_ID, BONDING_CURVE_TARGET_LAMPORTS } from "./constants";
 import { withRetry } from "./retry";
+
+/**
+ * DRY_RUN simulation: tracks per-mint start time and simulates bonding curve
+ * progressing from 0% → 100% over ~5 minutes.
+ *
+ * Timeline:
+ *   0–2 min:   0% → 40%  (Stage 1 trigger at ~2min)
+ *   2–3.5 min: 40% → 70% (Stage 2 trigger at ~3.5min)
+ *   3.5–5 min: 70% → 100% + complete=true (Stage 3 / Raydium migration)
+ */
+const dryRunStartTimes = new Map<string, number>();
+const DRY_RUN_DURATION_MS = 5 * 60 * 1000; // 5 minutes total
+
+function getDryRunSnapshot(mintAddress: string): BondingCurveSnapshot {
+  if (!dryRunStartTimes.has(mintAddress)) {
+    dryRunStartTimes.set(mintAddress, Date.now());
+  }
+
+  const elapsed = Date.now() - dryRunStartTimes.get(mintAddress)!;
+  const progress = Math.min((elapsed / DRY_RUN_DURATION_MS) * 100, 100);
+  const complete = progress >= 100;
+
+  // Simulate reserves proportional to progress
+  const realSolLamports = BigInt(Math.round((progress / 100) * BONDING_CURVE_TARGET_LAMPORTS));
+  const tokenSupply = BigInt("1000000000000000"); // 1B tokens (6 decimals)
+  const soldTokens = BigInt(Math.round(Number(tokenSupply) * (progress / 100)));
+  const remainingTokens = tokenSupply - soldTokens;
+
+  const state: BondingCurveState = {
+    virtualTokenReserves: remainingTokens + BigInt("800000000000000"),
+    virtualSolReserves: BigInt("30000000000") + realSolLamports,
+    realTokenReserves: remainingTokens,
+    realSolReserves: realSolLamports,
+    tokenTotalSupply: tokenSupply,
+    complete,
+  };
+
+  const vSol = Number(state.virtualSolReserves);
+  const vToken = Number(state.virtualTokenReserves);
+  const pricePerToken = vToken > 0 ? vSol / vToken : 0;
+
+  return { mintAddress, state, bondingProgress: progress, pricePerToken };
+}
 
 const log = createLogger("monitor");
 
@@ -97,6 +140,15 @@ export async function fetchBondingCurveState(
   connection: Connection,
   mintAddress: string,
 ): Promise<BondingCurveSnapshot | null> {
+  if (getEnv().DRY_RUN) {
+    const snapshot = getDryRunSnapshot(mintAddress);
+    log.debug(
+      { mintAddress, progress: snapshot.bondingProgress.toFixed(1), complete: snapshot.state.complete },
+      "[DRY_RUN] Simulated bonding curve state",
+    );
+    return snapshot;
+  }
+
   const pda = deriveBondingCurvePDA(mintAddress);
 
   const accountInfo = await withRetry(
@@ -122,6 +174,15 @@ export async function fetchAllSnapshots(
   mintAddresses: string[],
 ): Promise<Map<string, BondingCurveSnapshot>> {
   if (mintAddresses.length === 0) return new Map();
+
+  if (getEnv().DRY_RUN) {
+    const results = new Map<string, BondingCurveSnapshot>();
+    for (const mint of mintAddresses) {
+      results.set(mint, getDryRunSnapshot(mint));
+    }
+    log.debug({ count: results.size }, "[DRY_RUN] Simulated batch bonding curve snapshots");
+    return results;
+  }
 
   const pdas = mintAddresses.map((mint) => deriveBondingCurvePDA(mint));
 

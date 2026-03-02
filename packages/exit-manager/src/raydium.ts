@@ -3,7 +3,7 @@ import {
   Connection,
   VersionedTransaction,
 } from "@solana/web3.js";
-import { createLogger } from "@flash-pump/shared";
+import { createLogger, getEnv } from "@flash-pump/shared";
 import {
   JUPITER_API_URL,
   SOL_MINT,
@@ -41,6 +41,16 @@ export async function executeJupiterSell(
   tokenAmount: bigint,
   connection: Connection,
 ): Promise<JupiterSellResult> {
+  if (getEnv().DRY_RUN) {
+    const txSignature = `dry-run-sell-jupiter-${Date.now()}`;
+    const solReceived = Number(tokenAmount) * 0.000000002; // fake estimate
+    log.info(
+      { txSignature, mintAddress, wallet: walletAddress, tokenAmount: tokenAmount.toString(), solReceived },
+      "[DRY_RUN] Skipping Jupiter sell, returning fake tx",
+    );
+    return { txSignature, solReceived };
+  }
+
   const keypair = getKeypairForWallet(walletAddress);
 
   return withRetry(

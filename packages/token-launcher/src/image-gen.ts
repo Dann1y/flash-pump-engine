@@ -89,6 +89,14 @@ export async function generateAndUploadImage(
   ticker: string,
   description: string,
 ): Promise<ImageResult> {
+  const env = getEnv();
+
+  if (env.DRY_RUN) {
+    const metadataUri = `https://dry-run.local/metadata/${ticker.toLowerCase()}.json`;
+    log.info({ tokenName, ticker, metadataUri }, "[DRY_RUN] Skipping DALL-E + IPFS, returning placeholder URI");
+    return { metadataUri };
+  }
+
   return withRetry(
     async () => {
       log.info({ tokenName, ticker }, "Generating token image");

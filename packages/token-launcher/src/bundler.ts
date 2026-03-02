@@ -166,6 +166,13 @@ export interface BundleResult {
  */
 export async function submitBundle(req: BundleRequest): Promise<BundleResult> {
   const env = getEnv();
+
+  if (env.DRY_RUN) {
+    const bundleId = `dry-run-${Date.now()}-${req.mintKeypair.publicKey.toBase58().slice(0, 8)}`;
+    log.info({ bundleId, mint: req.mintKeypair.publicKey.toBase58() }, "[DRY_RUN] Skipping Jito bundle submission");
+    return { bundleId, status: "Landed" };
+  }
+
   const connection = new Connection(env.SOLANA_RPC_URL);
 
   return withRetry(

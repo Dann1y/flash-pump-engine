@@ -75,6 +75,12 @@ export async function initWalletPool(): Promise<void> {
 /** Refresh on-chain SOL balances for all wallets */
 export async function refreshBalances(): Promise<void> {
   const env = getEnv();
+
+  if (env.DRY_RUN) {
+    log.info("[DRY_RUN] Skipping on-chain balance refresh");
+    return;
+  }
+
   const db = getDb();
   const connection = new Connection(env.SOLANA_RPC_URL);
 
@@ -99,7 +105,6 @@ export async function getAvailableWallet(minSol: number): Promise<PoolWallet> {
   const env = getEnv();
   const cooldownMs = (env.WALLET_COOLDOWN_MINUTES ?? ANTI_DETECTION.walletCooldownMin) * 60 * 1000;
   const now = Date.now();
-  const connection = new Connection(env.SOLANA_RPC_URL);
 
   // Filter wallets off cooldown
   const candidates = pool.filter((w) => {
@@ -113,8 +118,16 @@ export async function getAvailableWallet(minSol: number): Promise<PoolWallet> {
     throw new Error("No wallets available — all on cooldown");
   }
 
-  // Shuffle and find one with sufficient balance
+  // Shuffle candidates
   const shuffled = candidates.sort(() => Math.random() - 0.5);
+
+  if (env.DRY_RUN) {
+    const w = shuffled[0];
+    log.info({ wallet: w.address }, "[DRY_RUN] Skipping balance check, selecting random wallet");
+    return w;
+  }
+
+  const connection = new Connection(env.SOLANA_RPC_URL);
 
   for (const w of shuffled) {
     const balance = await connection.getBalance(w.keypair.publicKey);
