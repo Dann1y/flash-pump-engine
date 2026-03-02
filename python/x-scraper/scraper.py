@@ -60,9 +60,10 @@ def empty_output() -> dict:
 
 
 class XScraper:
-    def __init__(self) -> None:
+    def __init__(self, *, headful: bool = False) -> None:
         self.context: BrowserContext | None = None
         self.page: Page | None = None
+        self._headful = headful
 
     async def launch(self) -> None:
         self._pw = await async_playwright().start()
@@ -70,8 +71,12 @@ class XScraper:
 
         AUTH_DIR.mkdir(parents=True, exist_ok=True)
 
+        headless = not self._headful
+        if self._headful:
+            log("Launching in headful mode (manual intervention possible)")
+
         storage_state = str(STATE_FILE) if STATE_FILE.exists() else None
-        self._browser = await self._pw.chromium.launch(headless=True, args=browser_args)
+        self._browser = await self._pw.chromium.launch(headless=headless, args=browser_args)
         self.context = await self._browser.new_context(
             storage_state=storage_state,
             viewport={"width": 1280, "height": 900},
@@ -398,8 +403,8 @@ def merge_and_deduplicate(
     return merged
 
 
-async def run() -> dict:
-    scraper = XScraper()
+async def run(*, headful: bool = False) -> dict:
+    scraper = XScraper(headful=headful)
     try:
         await scraper.launch()
 
@@ -440,23 +445,28 @@ def main() -> None:
     parser.add_argument(
         "--json", action="store_true", help="Output JSON to stdout"
     )
+    parser.add_argument(
+        "--headful", action="store_true",
+        help="Launch Chromium with visible UI (for manual login / CAPTCHA)",
+    )
     args = parser.parse_args()
 
     if not args.json:
-        print("Usage: scraper.py --json", file=sys.stderr)
+        print("Usage: scraper.py --json [--headful]", file=sys.stderr)
         sys.exit(1)
 
-    # Self-timeout: 110s (parent has 120s)
-    def timeout_handler(signum, frame):
-        log("TIMEOUT: self-terminating at 110s")
-        print(json.dumps(empty_output()))
-        sys.exit(1)
+    # Self-timeout: 110s (parent has 120s) — skip in headful mode to allow manual intervention
+    if not args.headful:
+        def timeout_handler(signum, frame):
+            log("TIMEOUT: self-terminating at 110s")
+            print(json.dumps(empty_output()))
+            sys.exit(1)
 
-    signal.signal(signal.SIGALRM, timeout_handler)
-    signal.alarm(OVERALL_TIMEOUT)
+        signal.signal(signal.SIGALRM, timeout_handler)
+        signal.alarm(OVERALL_TIMEOUT)
 
     try:
-        result = asyncio.run(run())
+        result = asyncio.run(run(headful=args.headful))
         print(json.dumps(result))
         sys.exit(0)
     except Exception as e:
