@@ -1,5 +1,9 @@
-import "dotenv/config";
+import dotenv from "dotenv";
+import path from "path";
 import { z } from "zod";
+
+// Load .env from monorepo root (walk up from shared/src/)
+dotenv.config({ path: path.resolve(__dirname, "../../../.env") });
 
 const envSchema = z.object({
   // Solana
