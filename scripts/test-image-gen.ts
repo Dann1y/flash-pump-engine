@@ -1,50 +1,42 @@
 /**
- * Quick smoke test for Gemini image generation.
+ * Quick smoke test for GPT Image Mini.
  * Usage: pnpm tsx scripts/test-image-gen.ts
  */
-import { GoogleGenAI } from "@google/genai";
+import OpenAI from "openai";
 import dotenv from "dotenv";
 import path from "path";
 
 dotenv.config({ path: path.resolve(__dirname, "../.env") });
 
-const apiKey = process.env.GEMINI_API_KEY;
+const apiKey = process.env.OPENAI_API_KEY;
 if (!apiKey) {
-  console.error("GEMINI_API_KEY not set in .env");
+  console.error("OPENAI_API_KEY not set in .env");
   process.exit(1);
 }
 
 async function main() {
-  const ai = new GoogleGenAI({ apiKey });
+  const openai = new OpenAI({ apiKey });
 
-  console.log("Calling Gemini image generation...");
-  const response = await ai.models.generateContent({
-    model: "gemini-3.1-flash-image-preview",
-    contents:
+  console.log("Calling GPT Image Mini...");
+  const response = await openai.images.generate({
+    model: "gpt-image-1-mini",
+    prompt:
       "Fun meme coin profile picture, cartoon frog wearing sunglasses, colorful crypto aesthetic, simple bold icon, no text",
-    config: {
-      responseModalities: ["IMAGE", "TEXT"],
-    },
+    n: 1,
+    size: "1024x1024",
   });
 
-  const parts = response.candidates?.[0]?.content?.parts;
-  if (!parts) {
-    throw new Error("No content parts returned");
+  const b64 = response.data?.[0]?.b64_json;
+  if (!b64) {
+    throw new Error("No image data returned");
   }
 
-  for (const part of parts) {
-    if (part.inlineData?.data) {
-      const buf = Buffer.from(part.inlineData.data, "base64");
-      console.log(`Image generated: ${buf.length} bytes`);
-      console.log("SUCCESS");
-      return;
-    }
-  }
-
-  throw new Error("No image data in response");
+  const buf = Buffer.from(b64, "base64");
+  console.log(`Image generated: ${buf.length} bytes`);
+  console.log("SUCCESS");
 }
 
 main().catch((e) => {
-  console.error("FAILED:", e);
+  console.error("FAILED:", e.message);
   process.exit(1);
 });

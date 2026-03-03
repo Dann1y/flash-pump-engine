@@ -1,45 +1,38 @@
-import { GoogleGenAI } from "@google/genai";
+import OpenAI from "openai";
 import { getEnv, createLogger, type LaunchSignal } from "@flash-pump/shared";
 import { withRetry } from "./retry";
 import { PUMP_IPFS_URL } from "./constants";
 
 const log = createLogger("image-gen");
 
-let genaiClient: GoogleGenAI | null = null;
+let openaiClient: OpenAI | null = null;
 
-function getClient(): GoogleGenAI {
-  if (!genaiClient) {
-    genaiClient = new GoogleGenAI({ apiKey: getEnv().GEMINI_API_KEY });
+function getClient(): OpenAI {
+  if (!openaiClient) {
+    openaiClient = new OpenAI({ apiKey: getEnv().OPENAI_API_KEY });
   }
-  return genaiClient;
+  return openaiClient;
 }
 
-/** Generate a meme token profile image with Gemini */
+/** Generate a meme token profile image with GPT Image Mini */
 async function generateImage(signal: LaunchSignal, tokenName: string): Promise<Buffer> {
-  const ai = getClient();
+  const openai = getClient();
 
   const prompt = `Create a fun, eye-catching meme coin profile picture for a cryptocurrency called "${tokenName}" inspired by the trend "${signal.keyword}". Style: colorful, cartoon-like, crypto meme aesthetic, simple and bold, suitable as a small profile icon. No text in the image.`;
 
-  const response = await ai.models.generateContent({
-    model: "gemini-3.1-flash-image-preview",
-    contents: prompt,
-    config: {
-      responseModalities: ["IMAGE", "TEXT"],
-    },
+  const response = await openai.images.generate({
+    model: "gpt-image-1-mini",
+    prompt,
+    n: 1,
+    size: "1024x1024",
   });
 
-  const parts = response.candidates?.[0]?.content?.parts;
-  if (!parts) {
-    throw new Error("Gemini returned no content parts");
+  const b64 = response.data?.[0]?.b64_json;
+  if (!b64) {
+    throw new Error("GPT Image Mini returned no image data");
   }
 
-  for (const part of parts) {
-    if (part.inlineData?.data) {
-      return Buffer.from(part.inlineData.data, "base64");
-    }
-  }
-
-  throw new Error("Gemini returned no image data");
+  return Buffer.from(b64, "base64");
 }
 
 /** Upload image buffer to pump.fun IPFS and return the metadata URI */
@@ -99,7 +92,7 @@ export async function generateAndUploadImage(
 
   return withRetry(
     async () => {
-      log.info({ tokenName, ticker }, "Generating token image");
+      log.info({ tokenName, ticker }, "Generating token image via GPT Image Mini");
       const imageBuffer = await generateImage(signal, tokenName);
       log.info({ size: imageBuffer.length }, "Image generated, uploading to IPFS");
 

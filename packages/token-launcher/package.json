@@ -10,6 +10,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
     "@flash-pump/shared": "workspace:*",
+    "openai": "^4.77.0",
     "@solana/web3.js": "^1.98.0",
     "bip39": "^3.1.0",
     "bs58": "^6.0.0",
@@ -17,7 +18,6 @@
     "drizzle-orm": "^0.39.3",
     "zod": "^3.24.0",
     "ed25519-hd-key": "^1.3.0",
-    "@google/genai": "^1.43.0",
     "tweetnacl": "^1.0.3"
   },
   "devDependencies": {
