@@ -25,5 +25,82 @@ services:
       timeout: 5s
       retries: 5
 
+  trend-detector:
+    build:
+      context: .
+      args:
+        PACKAGE: trend-detector
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://launcher:launcher@postgres:5432/meme_launcher
+      REDIS_URL: redis://redis:6379
+    restart: unless-stopped
+
+  token-launcher:
+    build:
+      context: .
+      args:
+        PACKAGE: token-launcher
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://launcher:launcher@postgres:5432/meme_launcher
+      REDIS_URL: redis://redis:6379
+    restart: unless-stopped
+
+  exit-manager:
+    build:
+      context: .
+      args:
+        PACKAGE: exit-manager
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://launcher:launcher@postgres:5432/meme_launcher
+      REDIS_URL: redis://redis:6379
+    restart: unless-stopped
+
+  telegram-bot:
+    build:
+      context: .
+      args:
+        PACKAGE: telegram-bot
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://launcher:launcher@postgres:5432/meme_launcher
+      REDIS_URL: redis://redis:6379
+    restart: unless-stopped
+
+  x-scraper:
+    build:
+      context: python/x-scraper
+    depends_on:
+      redis:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      REDIS_URL: redis://redis:6379
+    volumes:
+      - ./python/x-scraper/.auth:/app/.auth
+    restart: unless-stopped
+
 volumes:
   pgdata:

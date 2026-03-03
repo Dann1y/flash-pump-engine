@@ -59,6 +59,25 @@
 - [x] `.env` — `DRY_RUN=true` 설정
 - [x] TypeScript typecheck 통과
 
+## Infra & Docker ✅
+- [x] Docker Compose — postgres + redis healthy (46hrs uptime)
+- [x] DB migration — 5 tables confirmed (trends, tokens, trades, wallets, daily_pnl)
+- [x] Dockerfile — shared multi-stage build (node:20-alpine + pnpm), ARG PACKAGE selects service
+- [x] .dockerignore — excludes node_modules, dist, .git, .env, .auth
+- [x] docker-compose.yml — all 7 services (postgres, redis, 4 Node, x-scraper) with healthchecks
+- [x] Docker images built and tested: token-launcher, exit-manager, telegram-bot, trend-detector
+- [x] `scripts/docker-run.sh` — workaround for Docker Desktop v2.15.1 "extensions" bug
+
+## E2E Integration Test Results ✅
+- [x] token-launcher (DRY_RUN): signal injection → metadata → image → deploy → bundle → DB record → Redis event
+- [x] exit-manager (DRY_RUN): 2 active positions loaded → Stage 1 exit triggered → DRY_RUN sell → P&L aggregated
+- [x] telegram-bot: polling started → 4 Redis channels subscribed → commands ready
+- [x] trend-detector: starts → scraper invoked → graceful handling when no results
+- [x] Docker container test: token-launcher image runs with --network host, processes queue job successfully
+
+## Known Issues
+- Docker Compose v2.15.1 has "extensions" service conflict (Docker Desktop bug). Workaround: use `scripts/docker-run.sh` or upgrade Docker Desktop.
+
 ## Remaining
-- [ ] E2E 검증 실행 (4모듈 동시 기동 + DB/Telegram 확인)
-- [ ] Mainnet 배포
+- [ ] Mainnet 배포 (DRY_RUN=false)
+- [ ] X.com auth setup for trend-detector (Playwright cookies)
