@@ -1,41 +1,45 @@
-import Replicate, { FileOutput } from "replicate";
+import { GoogleGenAI } from "@google/genai";
 import { getEnv, createLogger, type LaunchSignal } from "@flash-pump/shared";
 import { withRetry } from "./retry";
 import { PUMP_IPFS_URL } from "./constants";
 
 const log = createLogger("image-gen");
 
-let replicateClient: Replicate | null = null;
+let genaiClient: GoogleGenAI | null = null;
 
-function getClient(): Replicate {
-  if (!replicateClient) {
-    replicateClient = new Replicate({ auth: getEnv().REPLICATE_API_TOKEN });
+function getClient(): GoogleGenAI {
+  if (!genaiClient) {
+    genaiClient = new GoogleGenAI({ apiKey: getEnv().GEMINI_API_KEY });
   }
-  return replicateClient;
+  return genaiClient;
 }
 
-/** Generate a meme token profile image with Replicate Flux Schnell */
+/** Generate a meme token profile image with Gemini */
 async function generateImage(signal: LaunchSignal, tokenName: string): Promise<Buffer> {
-  const replicate = getClient();
+  const ai = getClient();
 
   const prompt = `Create a fun, eye-catching meme coin profile picture for a cryptocurrency called "${tokenName}" inspired by the trend "${signal.keyword}". Style: colorful, cartoon-like, crypto meme aesthetic, simple and bold, suitable as a small profile icon. No text in the image.`;
 
-  const output = await replicate.run("black-forest-labs/flux-schnell", {
-    input: {
-      prompt,
-      num_outputs: 1,
-      aspect_ratio: "1:1",
+  const response = await ai.models.generateContent({
+    model: "gemini-3.1-flash-image-preview",
+    contents: prompt,
+    config: {
+      responseModalities: ["IMAGE", "TEXT"],
     },
   });
 
-  const results = output as FileOutput[];
-  const file = results[0];
-  if (!file) {
-    throw new Error("Flux Schnell returned no output");
+  const parts = response.candidates?.[0]?.content?.parts;
+  if (!parts) {
+    throw new Error("Gemini returned no content parts");
   }
 
-  const blob = await file.blob();
-  return Buffer.from(await blob.arrayBuffer());
+  for (const part of parts) {
+    if (part.inlineData?.data) {
+      return Buffer.from(part.inlineData.data, "base64");
+    }
+  }
+
+  throw new Error("Gemini returned no image data");
 }
 
 /** Upload image buffer to pump.fun IPFS and return the metadata URI */
