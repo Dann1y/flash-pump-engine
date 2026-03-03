@@ -1,74 +1,12 @@
 import {
   Keypair,
   VersionedTransaction,
-  SystemProgram,
-  PublicKey,
-  TransactionMessage,
-  LAMPORTS_PER_SOL,
-  Connection,
 } from "@solana/web3.js";
 import bs58 from "bs58";
 import { createLogger, getEnv } from "@flash-pump/shared";
-import { JITO_ENDPOINTS, JITO_TIP_ACCOUNTS, ANTI_DETECTION } from "./constants";
-import { withRetry } from "./retry";
+import { JITO_ENDPOINTS } from "./constants";
 
 const log = createLogger("bundler");
-
-/** Randomize Jito tip within anti-detection bounds */
-function randomTipLamports(): number {
-  const { minTipSol, maxTipSol } = ANTI_DETECTION;
-  const tipSol = minTipSol + Math.random() * (maxTipSol - minTipSol);
-  return Math.round(tipSol * LAMPORTS_PER_SOL);
-}
-
-/** Pick a random Jito tip account */
-function randomTipAccount(): PublicKey {
-  return JITO_TIP_ACCOUNTS[Math.floor(Math.random() * JITO_TIP_ACCOUNTS.length)];
-}
-
-/** Build a tip transaction for Jito */
-async function buildTipTransaction(
-  payer: Keypair,
-  connection: Connection,
-): Promise<VersionedTransaction> {
-  const tipLamports = randomTipLamports();
-  const tipAccount = randomTipAccount();
-
-  const { blockhash } = await connection.getLatestBlockhash("confirmed");
-
-  const instruction = SystemProgram.transfer({
-    fromPubkey: payer.publicKey,
-    toPubkey: tipAccount,
-    lamports: tipLamports,
-  });
-
-  const messageV0 = new TransactionMessage({
-    payerKey: payer.publicKey,
-    recentBlockhash: blockhash,
-    instructions: [instruction],
-  }).compileToV0Message();
-
-  const tx = new VersionedTransaction(messageV0);
-  tx.sign([payer]);
-
-  log.info(
-    { tipSol: tipLamports / LAMPORTS_PER_SOL, tipAccount: tipAccount.toBase58() },
-    "Tip transaction built",
-  );
-
-  return tx;
-}
-
-/** Sign a PumpPortal transaction with the required keypairs */
-function signTransaction(
-  txBase64: string,
-  signers: Keypair[],
-): VersionedTransaction {
-  const txBytes = Buffer.from(txBase64, "base64");
-  const tx = VersionedTransaction.deserialize(new Uint8Array(txBytes));
-  tx.sign(signers);
-  return tx;
-}
 
 /** Submit bundle to a specific Jito endpoint */
 async function submitToEndpoint(
@@ -147,11 +85,11 @@ async function pollBundleStatus(
 }
 
 export interface BundleRequest {
-  /** Base64-encoded unsigned create+buy transaction from PumpPortal */
-  createTxBase64: string;
+  /** bs58-encoded unsigned transactions from PumpPortal bundle API [createTx, buyTx] */
+  txsBase58: string[];
   /** Mint keypair (must sign the create tx) */
   mintKeypair: Keypair;
-  /** Deployer wallet keypair (pays for everything) */
+  /** Deployer wallet keypair (signs both txs) */
   deployerKeypair: Keypair;
 }
 
@@ -161,8 +99,12 @@ export interface BundleResult {
 }
 
 /**
- * Sign transactions, build Jito tip, submit bundle with endpoint failover.
- * Retries up to 3 times with fresh blockhash each attempt.
+ * Sign PumpPortal bundle transactions and submit via Jito.
+ *
+ * The PumpPortal bundle API returns [createTx, buyTx] as bs58-encoded unsigned txs.
+ * - createTx needs both mintKeypair + deployerKeypair signatures
+ * - buyTx needs only deployerKeypair signature
+ * - First tx's priorityFee is the Jito tip (no separate tip tx needed)
  */
 export async function submitBundle(req: BundleRequest): Promise<BundleResult> {
   const env = getEnv();
@@ -173,31 +115,36 @@ export async function submitBundle(req: BundleRequest): Promise<BundleResult> {
     return { bundleId, status: "Landed" };
   }
 
-  const connection = new Connection(env.SOLANA_RPC_URL);
+  // No internal retry — caller retries with fresh PumpPortal txs (new blockhash)
+  {
+      const signedTxs: string[] = [];
 
-  return withRetry(
-    async () => {
-      // 1. Sign the PumpPortal transaction
-      const signedCreateTx = signTransaction(req.createTxBase64, [
-        req.deployerKeypair,
-        req.mintKeypair,
-      ]);
+      for (let i = 0; i < req.txsBase58.length; i++) {
+        const txBytes = bs58.decode(req.txsBase58[i]);
+        const tx = VersionedTransaction.deserialize(txBytes);
 
-      // 2. Build tip transaction (fresh blockhash each attempt)
-      const tipTx = await buildTipTransaction(req.deployerKeypair, connection);
+        if (i === 0) {
+          // Create tx: sign with both mint keypair and deployer
+          tx.sign([req.mintKeypair, req.deployerKeypair]);
+        } else {
+          // Buy tx: sign with deployer only
+          tx.sign([req.deployerKeypair]);
+        }
 
-      // 3. Serialize both transactions
-      const serializedTxs = [
-        bs58.encode(signedCreateTx.serialize()),
-        bs58.encode(tipTx.serialize()),
-      ];
+        signedTxs.push(bs58.encode(tx.serialize()));
+      }
 
-      // 4. Try each Jito endpoint until one succeeds
+      log.info(
+        { txCount: signedTxs.length, mint: req.mintKeypair.publicKey.toBase58() },
+        "Transactions signed, submitting bundle to Jito",
+      );
+
+      // Try each Jito endpoint until one succeeds
       let lastError: Error | undefined;
       for (const endpoint of JITO_ENDPOINTS) {
         try {
-          log.info({ endpoint }, "Submitting bundle to Jito");
-          const bundleId = await submitToEndpoint(endpoint, serializedTxs);
+          log.info({ endpoint }, "Submitting bundle");
+          const bundleId = await submitToEndpoint(endpoint, signedTxs);
           log.info({ bundleId, endpoint }, "Bundle submitted, polling status");
 
           const status = await pollBundleStatus(endpoint, bundleId);
@@ -215,7 +162,5 @@ export async function submitBundle(req: BundleRequest): Promise<BundleResult> {
       }
 
       throw lastError ?? new Error("All Jito endpoints failed");
-    },
-    { maxAttempts: 3, label: "submitBundle" },
-  );
+  }
 }
