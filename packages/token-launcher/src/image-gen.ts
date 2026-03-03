@@ -1,45 +1,41 @@
-import OpenAI from "openai";
+import Replicate, { FileOutput } from "replicate";
 import { getEnv, createLogger, type LaunchSignal } from "@flash-pump/shared";
 import { withRetry } from "./retry";
 import { PUMP_IPFS_URL } from "./constants";
 
 const log = createLogger("image-gen");
 
-let openaiClient: OpenAI | null = null;
+let replicateClient: Replicate | null = null;
 
-function getClient(): OpenAI {
-  if (!openaiClient) {
-    openaiClient = new OpenAI({ apiKey: getEnv().OPENAI_API_KEY });
+function getClient(): Replicate {
+  if (!replicateClient) {
+    replicateClient = new Replicate({ auth: getEnv().REPLICATE_API_TOKEN });
   }
-  return openaiClient;
+  return replicateClient;
 }
 
-/** Generate a meme token profile image with DALL-E 3 */
+/** Generate a meme token profile image with Replicate Flux Schnell */
 async function generateImage(signal: LaunchSignal, tokenName: string): Promise<Buffer> {
-  const openai = getClient();
+  const replicate = getClient();
 
   const prompt = `Create a fun, eye-catching meme coin profile picture for a cryptocurrency called "${tokenName}" inspired by the trend "${signal.keyword}". Style: colorful, cartoon-like, crypto meme aesthetic, simple and bold, suitable as a small profile icon. No text in the image.`;
 
-  const response = await openai.images.generate({
-    model: "dall-e-3",
-    prompt,
-    n: 1,
-    size: "1024x1024",
-    response_format: "url",
+  const output = await replicate.run("black-forest-labs/flux-schnell", {
+    input: {
+      prompt,
+      num_outputs: 1,
+      aspect_ratio: "1:1",
+    },
   });
 
-  const imageUrl = response.data?.[0]?.url;
-  if (!imageUrl) {
-    throw new Error("DALL-E 3 returned no image URL");
+  const results = output as FileOutput[];
+  const file = results[0];
+  if (!file) {
+    throw new Error("Flux Schnell returned no output");
   }
 
-  // Download the image
-  const res = await fetch(imageUrl);
-  if (!res.ok) {
-    throw new Error(`Failed to download image: ${res.status}`);
-  }
-
-  return Buffer.from(await res.arrayBuffer());
+  const blob = await file.blob();
+  return Buffer.from(await blob.arrayBuffer());
 }
 
 /** Upload image buffer to pump.fun IPFS and return the metadata URI */
@@ -93,7 +89,7 @@ export async function generateAndUploadImage(
 
   if (env.DRY_RUN) {
     const metadataUri = `https://dry-run.local/metadata/${ticker.toLowerCase()}.json`;
-    log.info({ tokenName, ticker, metadataUri }, "[DRY_RUN] Skipping DALL-E + IPFS, returning placeholder URI");
+    log.info({ tokenName, ticker, metadataUri }, "[DRY_RUN] Skipping image gen + IPFS, returning placeholder URI");
     return { metadataUri };
   }
 

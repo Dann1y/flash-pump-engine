@@ -17,7 +17,7 @@ const envSchema = z.object({
 
   // AI
   ANTHROPIC_API_KEY: z.string().startsWith("sk-ant-"),
-  OPENAI_API_KEY: z.string().startsWith("sk-"),
+  REPLICATE_API_TOKEN: z.string().min(1),
 
   // X.com (Playwright scraping)
   X_USERNAME: z.string().min(1),
