@@ -31,9 +31,9 @@ export const ANTI_DETECTION = {
   /** Initial buy SOL range */
   minBuySol: 0.05,
   maxBuySol: 0.2,
-  /** Jito tip SOL range */
-  minTipSol: 0.001,
-  maxTipSol: 0.005,
+  /** Jito tip SOL range (via PumpPortal priorityFee on create tx) */
+  minTipSol: 0.005,
+  maxTipSol: 0.01,
   /** Min seconds between launches (BullMQ rate limiter) */
   minLaunchIntervalSec: 180,
   /** Wallet cooldown in minutes */
