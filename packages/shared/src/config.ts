@@ -40,6 +40,10 @@ const envSchema = z.object({
   // Mode
   DRY_RUN: z.string().default("false").transform((v) => v === "true" || v === "1"),
 
+  // Dashboard
+  DASHBOARD_PASSWORD: z.string().min(1).optional(),
+  DASHBOARD_COOKIE_SECRET: z.string().min(16).optional(),
+
   // Config
   TREND_SCORE_THRESHOLD: z.coerce.number().min(0).max(1).default(0.7),
   INITIAL_BUY_SOL: z.coerce.number().positive().default(0.1),

@@ -1,0 +1,23 @@
+{
+  "name": "@flash-pump/dashboard",
+  "version": "0.0.1",
+  "private": true,
+  "main": "src/index.ts",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@flash-pump/shared": "workspace:*",
+    "@solana/web3.js": "^1.98.0",
+    "drizzle-orm": "^0.39.3",
+    "@hono/node-server": "^1.13.0",
+    "bs58": "^6.0.0",
+    "hono": "^4.7.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}

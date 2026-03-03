@@ -89,6 +89,21 @@ services:
       REDIS_URL: redis://redis:6379
     restart: unless-stopped
 
+  dashboard:
+    build:
+      context: .
+      args:
+        PACKAGE: dashboard
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://launcher:launcher@postgres:5432/meme_launcher
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+
   x-scraper:
     build:
       context: python/x-scraper

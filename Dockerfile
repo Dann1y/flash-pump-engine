@@ -23,6 +23,7 @@ COPY packages/token-launcher/package.json  packages/token-launcher/package.json
 COPY packages/exit-manager/package.json    packages/exit-manager/package.json
 COPY packages/trend-detector/package.json  packages/trend-detector/package.json
 COPY packages/telegram-bot/package.json    packages/telegram-bot/package.json
+COPY packages/dashboard/package.json      packages/dashboard/package.json
 
 RUN pnpm install --frozen-lockfile
 
