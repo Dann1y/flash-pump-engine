@@ -1,7 +1,6 @@
 import { Keypair } from "@solana/web3.js";
 import { createLogger, getEnv } from "@flash-pump/shared";
 import { PUMP_PORTAL_URL, ANTI_DETECTION } from "./constants";
-import { withRetry } from "./retry";
 
 const log = createLogger("deployer");
 
@@ -23,8 +22,8 @@ export interface DeployRequest {
 export interface DeployResult {
   /** Fresh mint keypair for this token */
   mintKeypair: Keypair;
-  /** Base64-encoded unsigned VersionedTransaction for token creation */
-  createTxBase64: string;
+  /** bs58-encoded unsigned transactions [createTx, buyTx] from PumpPortal bundle API */
+  txsBase58: string[];
 }
 
 /** Randomize initial buy amount within anti-detection bounds */
@@ -34,22 +33,25 @@ export function randomizeBuyAmount(): number {
 }
 
 /**
- * Call PumpPortal API to build create + initial-buy VersionedTransaction.
- * Returns unsigned transaction bytes + mint keypair.
+ * Call PumpPortal bundle API to build create + buy VersionedTransactions.
+ *
+ * PumpPortal's create action has a bug with dev buy amount > 0 (Token2022 migration),
+ * so we split into [create(amount=0), buy(amount)] as a bundle array.
+ * The response is a JSON array of bs58-encoded unsigned transactions.
  */
-export async function buildDeployTransaction(req: DeployRequest): Promise<DeployResult> {
-  const mintKeypair = Keypair.generate();
+export async function buildDeployTransaction(req: DeployRequest, existingMint?: Keypair): Promise<DeployResult> {
+  const mintKeypair = existingMint ?? Keypair.generate();
 
   if (getEnv().DRY_RUN) {
     log.info(
       { name: req.name, ticker: req.ticker, mint: mintKeypair.publicKey.toBase58() },
-      "[DRY_RUN] Skipping PumpPortal create API, returning empty tx",
+      "[DRY_RUN] Skipping PumpPortal create API, returning empty txs",
     );
-    return { mintKeypair, createTxBase64: "" };
+    return { mintKeypair, txsBase58: [] };
   }
 
-  return withRetry(
-    async () => {
+  // No internal retry — caller handles retry with fresh blockhash
+  {
       log.info(
         {
           name: req.name,
@@ -57,29 +59,45 @@ export async function buildDeployTransaction(req: DeployRequest): Promise<Deploy
           mint: mintKeypair.publicKey.toBase58(),
           buySol: req.initialBuySol,
         },
-        "Building deploy transaction via PumpPortal",
+        "Building deploy transactions via PumpPortal bundle API",
       );
 
-      const body = {
-        publicKey: req.deployerAddress,
-        action: "create",
-        tokenMetadata: {
-          name: req.name,
-          symbol: req.ticker,
-          uri: req.metadataUri,
+      // Bundle: create(0) + buy(amount) as array
+      // PumpPortal bug: create with amount>0 fails (Token2022 toBuffer error)
+      const tipSol = ANTI_DETECTION.minTipSol + Math.random() * (ANTI_DETECTION.maxTipSol - ANTI_DETECTION.minTipSol);
+
+      const bundledTxArgs = [
+        {
+          publicKey: req.deployerAddress,
+          action: "create",
+          tokenMetadata: {
+            name: req.name,
+            symbol: req.ticker,
+            uri: req.metadataUri,
+          },
+          mint: mintKeypair.publicKey.toBase58(),
+          denominatedInSol: "true",
+          amount: 0,
+          slippage: 10,
+          priorityFee: tipSol, // First tx priorityFee = Jito tip
+          pool: "pump",
         },
-        mint: mintKeypair.publicKey.toBase58(),
-        denominatedInSol: "true",
-        amount: req.initialBuySol,
-        slippage: 10,
-        priorityFee: 0.0005,
-        pool: "pump",
-      };
+        {
+          publicKey: req.deployerAddress,
+          action: "buy",
+          mint: mintKeypair.publicKey.toBase58(),
+          denominatedInSol: "true",
+          amount: req.initialBuySol,
+          slippage: 50,
+          priorityFee: 0.00005, // Ignored in bundle (only first matters)
+          pool: "pump",
+        },
+      ];
 
       const res = await fetch(PUMP_PORTAL_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        body: JSON.stringify(bundledTxArgs),
       });
 
       if (!res.ok) {
@@ -87,17 +105,21 @@ export async function buildDeployTransaction(req: DeployRequest): Promise<Deploy
         throw new Error(`PumpPortal API error (${res.status}): ${errBody}`);
       }
 
-      // PumpPortal returns raw transaction bytes
-      const txBuffer = Buffer.from(await res.arrayBuffer());
-      const createTxBase64 = txBuffer.toString("base64");
+      const txsBase58: string[] = await res.json();
+
+      if (!Array.isArray(txsBase58) || txsBase58.length < 2) {
+        throw new Error(`Expected 2 transactions, got ${txsBase58?.length ?? 0}`);
+      }
 
       log.info(
-        { mint: mintKeypair.publicKey.toBase58(), txSize: txBuffer.length },
-        "Deploy transaction built",
+        {
+          mint: mintKeypair.publicKey.toBase58(),
+          txCount: txsBase58.length,
+          tipSol: tipSol.toFixed(5),
+        },
+        "Deploy transactions built",
       );
 
-      return { mintKeypair, createTxBase64 };
-    },
-    { maxAttempts: 3, label: "buildDeployTransaction" },
-  );
+      return { mintKeypair, txsBase58 };
+  }
 }
