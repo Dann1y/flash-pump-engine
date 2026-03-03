@@ -78,6 +78,35 @@
 ## Known Issues
 - Docker Compose v2.15.1 has "extensions" service conflict (Docker Desktop bug). Workaround: use `scripts/docker-run.sh` or upgrade Docker Desktop.
 
+## Mainnet Single Token Launch Test (2026-03-03) ✅
+- [x] X.com scraper authentication — headful mode + 2FA, 75 trends collected
+- [x] Preflight: Helius RPC ✅, Anthropic API ✅, OpenAI API ✅, wallet 0.499 SOL
+- [x] PumpPortal Token2022 bug fix — bundle array [create(0), buy(amount)]
+- [x] Jito bundle retry fix — fresh txs per attempt, tip 0.005-0.01 SOL
+- [x] Token launched: **SolTest Injection (INJECT)**
+  - Mint: `2vKDpcHr6Tm7ZH4j3kNmyG6MzTufoqkdYSx3bvKajRBZ`
+  - Bundle ID: `05e5183a97e970897af7f810903ddc509eefcfad4d06f982d949763660bf7641`
+  - pump.fun: https://pump.fun/coin/2vKDpcHr6Tm7ZH4j3kNmyG6MzTufoqkdYSx3bvKajRBZ
+  - Token program: Token2022
+  - Bonding curve: Legacy pump program (6EF8...)
+  - Initial buy: ~0.12 SOL
+  - Jito endpoint: Frankfurt
+- [x] Exit-manager: bonding curve PDA found, monitoring operational
+- [x] Old DRY_RUN tokens cleaned up (IDs 3,4,5 → status=completed)
+- [x] Consecutive failure counter added to exit-engine (3 strikes → mark failed)
+- [x] DRY_RUN=true restored
+
+### Cost Summary
+| Item | SOL |
+|------|-----|
+| Initial buy | ~0.12 |
+| Jito tip | ~0.007 |
+| Rent/fees | ~0.12 |
+| **Total** | **~0.25** |
+| OpenAI image | $0.005 |
+| Anthropic metadata | ~$0.01 |
+
 ## Remaining
-- [ ] Mainnet 배포 (DRY_RUN=false)
+- [ ] Exit-manager sell flow validation (PumpPortal sell for Token2022 tokens)
+- [ ] Full E2E automated pipeline (trend-detector → token-launcher → exit-manager)
 - [ ] X.com auth setup for trend-detector (Playwright cookies)
