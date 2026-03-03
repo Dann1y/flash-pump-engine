@@ -1,6 +1,11 @@
 import { Worker, type Job } from "bullmq";
 import { sql, eq } from "drizzle-orm";
 import {
+  Connection,
+  Keypair,
+  PublicKey,
+} from "@solana/web3.js";
+import {
   createLogger,
   getDb,
   getEnv,
@@ -19,6 +24,53 @@ import { buildDeployTransaction, randomizeBuyAmount } from "./deployer";
 import { submitBundle } from "./bundler";
 
 const log = createLogger("token-launcher");
+
+const TOKEN_PROGRAM_ID = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+const TOKEN_2022_PROGRAM_ID = new PublicKey("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
+const ATA_PROGRAM_ID = new PublicKey("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
+
+/** Derive the Associated Token Account address for a wallet + mint (tries both Token and Token2022) */
+function getAssociatedTokenAddresses(walletPubkey: PublicKey, mintPubkey: PublicKey): PublicKey[] {
+  return [TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID].map((tokenProgram) => {
+    const [ata] = PublicKey.findProgramAddressSync(
+      [walletPubkey.toBuffer(), tokenProgram.toBuffer(), mintPubkey.toBuffer()],
+      ATA_PROGRAM_ID,
+    );
+    return ata;
+  });
+}
+
+/** Query on-chain token balance for a wallet's ATA after bundle lands (checks both Token programs) */
+async function queryTokenBalance(
+  connection: Connection,
+  walletAddress: string,
+  mintAddress: string,
+  maxRetries = 5,
+): Promise<bigint> {
+  const walletPubkey = new PublicKey(walletAddress);
+  const mintPubkey = new PublicKey(mintAddress);
+  const atas = getAssociatedTokenAddresses(walletPubkey, mintPubkey);
+
+  for (let i = 0; i < maxRetries; i++) {
+    await new Promise((r) => setTimeout(r, 2000 * (i + 1)));
+    for (const ata of atas) {
+      try {
+        const accountInfo = await connection.getTokenAccountBalance(ata);
+        const amount = BigInt(accountInfo.value.amount);
+        if (amount > BigInt(0)) {
+          log.info({ ata: ata.toBase58(), amount: amount.toString() }, "Token balance fetched");
+          return amount;
+        }
+      } catch {
+        // ATA doesn't exist for this token program, try next
+      }
+    }
+    log.debug({ attempt: i + 1 }, "Token account not yet available, retrying...");
+  }
+
+  log.warn({ walletAddress, mintAddress }, "Could not fetch token balance after retries");
+  return BigInt(0);
+}
 
 /** Check how many tokens were launched today */
 async function getDailyLaunchCount(): Promise<number> {
@@ -66,17 +118,10 @@ async function processLaunch(job: Job<LaunchSignal>): Promise<void> {
   const totalNeeded = initialBuySol + ANTI_DETECTION.maxTipSol + 0.01; // buy + tip + rent/fees
   const wallet = await getAvailableWallet(totalNeeded);
 
-  // 5. Build deploy transaction
-  const { mintKeypair, createTxBase64 } = await buildDeployTransaction({
-    deployerAddress: wallet.address,
-    name: metadata.name,
-    ticker: metadata.ticker,
-    description: metadata.description,
-    metadataUri,
-    initialBuySol,
-  });
-
+  // 5. Generate mint keypair (reused across retries — same token address)
+  const mintKeypair = Keypair.generate();
   const mintAddress = mintKeypair.publicKey.toBase58();
+  const deployerKeypair = getKeypairByAddress(wallet.address);
 
   // 6. Insert token record (status: deploying)
   const [tokenRecord] = await db
@@ -94,16 +139,49 @@ async function processLaunch(job: Job<LaunchSignal>): Promise<void> {
     .returning();
 
   try {
-    // 7. Submit Jito bundle
-    const deployerKeypair = getKeypairByAddress(wallet.address);
-    const bundleResult = await submitBundle({
-      createTxBase64,
-      mintKeypair,
-      deployerKeypair,
-    });
+    // 7. Deploy + bundle with retry (fresh PumpPortal txs each attempt for new blockhash)
+    const MAX_DEPLOY_ATTEMPTS = 3;
+    let bundleResult: Awaited<ReturnType<typeof submitBundle>> | null = null;
 
-    if (bundleResult.status !== "Landed") {
-      throw new Error(`Bundle failed: ${bundleResult.bundleId}`);
+    for (let attempt = 1; attempt <= MAX_DEPLOY_ATTEMPTS; attempt++) {
+      try {
+        log.info({ attempt, maxAttempts: MAX_DEPLOY_ATTEMPTS }, "Building deploy txs (fresh blockhash)");
+
+        const deployResult = await buildDeployTransaction({
+          deployerAddress: wallet.address,
+          name: metadata.name,
+          ticker: metadata.ticker,
+          description: metadata.description,
+          metadataUri,
+          initialBuySol,
+        }, mintKeypair);
+
+        const result = await submitBundle({
+          txsBase58: deployResult.txsBase58,
+          mintKeypair,
+          deployerKeypair,
+        });
+
+        if (result.status === "Landed") {
+          bundleResult = result;
+          break;
+        }
+
+        log.warn({ attempt, bundleId: result.bundleId }, "Bundle failed to land, retrying with fresh txs");
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        if (attempt < MAX_DEPLOY_ATTEMPTS) {
+          const delay = 2000 * attempt;
+          log.warn({ attempt, error: errMsg, delay }, "Deploy+bundle failed, retrying...");
+          await new Promise((r) => setTimeout(r, delay));
+        } else {
+          throw err;
+        }
+      }
+    }
+
+    if (!bundleResult || bundleResult.status !== "Landed") {
+      throw new Error("Bundle failed after all attempts");
     }
 
     // 8. Update token status to active
@@ -116,9 +194,16 @@ async function processLaunch(job: Job<LaunchSignal>): Promise<void> {
       .where(eq(tokens.id, tokenRecord.id));
 
     // 9. Record the initial buy trade
-    // In DRY_RUN mode, use a fake token amount (~1000 tokens at 6 decimals)
-    // so exit-manager can track the position (it skips positions with 0 tokens)
-    const buyTokenAmount = getEnv().DRY_RUN ? BigInt(1_000_000_000) : BigInt(0);
+    // In DRY_RUN: fake token amount. In production: query on-chain balance.
+    let buyTokenAmount: bigint;
+    if (getEnv().DRY_RUN) {
+      buyTokenAmount = BigInt(1_000_000_000);
+    } else {
+      const connection = new Connection(env.SOLANA_RPC_URL);
+      buyTokenAmount = await queryTokenBalance(connection, wallet.address, mintAddress);
+      log.info({ mintAddress, buyTokenAmount: buyTokenAmount.toString() }, "Initial buy tokens acquired");
+    }
+
     await db.insert(trades).values({
       tokenId: tokenRecord.id,
       type: "buy",
