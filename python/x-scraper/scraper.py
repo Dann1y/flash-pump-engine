@@ -151,13 +151,29 @@ class XScraper:
 
             # Step 2: Check for phone/email verification challenge
             phone_input = page.locator('input[data-testid="ocfEnterTextTextInput"]')
-            if await phone_input.is_visible():
+            try:
+                await phone_input.wait_for(timeout=3000)
+                phone_visible = True
+            except Exception:
+                phone_visible = False
+
+            if phone_visible:
                 phone_hint = os.environ.get("X_PHONE_HINT", "")
                 if phone_hint:
                     log("Phone verification required, entering hint...")
                     await phone_input.fill(phone_hint)
                     await page.keyboard.press("Enter")
                     await page.wait_for_timeout(2000)
+                elif self._headful:
+                    log("Phone verification required — please complete it manually in the browser...")
+                    # Wait for the phone challenge to be resolved (password input appears)
+                    password_input = page.locator('input[name="password"]')
+                    try:
+                        await password_input.wait_for(timeout=120000)
+                        log("Phone verification completed manually")
+                    except Exception:
+                        log("ERROR: Phone verification timed out (120s)")
+                        return False
                 else:
                     log("ERROR: Phone verification required but X_PHONE_HINT not set")
                     return False
@@ -169,21 +185,19 @@ class XScraper:
             await page.keyboard.press("Enter")
             await page.wait_for_timeout(3000)
 
-            # Verify login success
-            url = page.url
-            if "/home" in url:
-                log("Login successful")
-                await self.context.storage_state(path=str(STATE_FILE))
-                return True
+            # Step 4: Wait for login completion (handles 2FA prompts in headful mode)
+            # Poll for /home URL — in headful mode, allow manual 2FA completion
+            max_wait = 120 if self._headful else 10
+            log(f"Waiting for login completion (max {max_wait}s)...")
+            for i in range(max_wait):
+                url = page.url
+                if "/home" in url:
+                    log("Login successful")
+                    await self.context.storage_state(path=str(STATE_FILE))
+                    return True
+                await page.wait_for_timeout(1000)
 
-            # Wait a bit more and recheck
-            await page.wait_for_timeout(3000)
             url = page.url
-            if "/home" in url:
-                log("Login successful (delayed)")
-                await self.context.storage_state(path=str(STATE_FILE))
-                return True
-
             log(f"Login may have failed, current URL: {url}")
             return False
 
