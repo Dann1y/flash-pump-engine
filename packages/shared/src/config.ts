@@ -38,7 +38,7 @@ const envSchema = z.object({
   ),
 
   // Mode
-  DRY_RUN: z.coerce.boolean().default(false),
+  DRY_RUN: z.string().default("false").transform((v) => v === "true" || v === "1"),
 
   // Config
   TREND_SCORE_THRESHOLD: z.coerce.number().min(0).max(1).default(0.7),
