@@ -39,6 +39,8 @@ export interface ActivePosition {
   raydiumMigrated: boolean;
   /** Lock to prevent concurrent sell attempts */
   selling: boolean;
+  /** Consecutive sell failures — after 3, mark as failed and stop retrying */
+  consecutiveFailures: number;
 }
 
 /** What action the exit evaluator returns */
@@ -116,6 +118,7 @@ export async function loadActivePositions(): Promise<void> {
       currentStage: lastExitStage,
       raydiumMigrated: token.raydiumMigrated ?? false,
       selling: false,
+      consecutiveFailures: 0,
     });
   }
 
@@ -146,6 +149,7 @@ export function addPosition(data: {
     currentStage: 0,
     raydiumMigrated: false,
     selling: false,
+    consecutiveFailures: 0,
   });
 
   log.info({ tokenId: data.tokenId, mintAddress: data.mintAddress }, "New position added");
@@ -171,8 +175,11 @@ export function evaluateExitCondition(
   // Skip if already selling or no tokens left
   if (pos.selling || pos.remainingTokens <= BigInt(0)) return null;
 
-  // If bonding curve account is gone, emergency exit
+  // If bonding curve account is gone:
+  // - If position has no tokens, nothing to do
+  // - Otherwise, flag as emergency exit (caller handles gracefully)
   if (!snapshot) {
+    if (pos.remainingTokens <= BigInt(0)) return null;
     return {
       stage: 1,
       sellTokens: pos.remainingTokens,
@@ -284,7 +291,16 @@ export async function runMonitorTick(
   const mintAddresses: string[] = [];
   const posArray: ActivePosition[] = [];
   for (const pos of positions.values()) {
-    if (!pos.selling && (pos.remainingTokens > BigInt(0) || pos.entryPrice === 0)) {
+    // Skip positions that are selling, empty, or have failed too many times
+    if (pos.selling) continue;
+    if (pos.consecutiveFailures >= 3) {
+      // After 3 consecutive sell failures, mark as failed and remove
+      log.warn({ tokenId: pos.tokenId, failures: pos.consecutiveFailures }, "Too many consecutive sell failures, marking as failed");
+      await db.update(tokens).set({ status: "failed" }).where(eq(tokens.id, pos.tokenId));
+      positions.delete(pos.tokenId);
+      continue;
+    }
+    if (pos.remainingTokens > BigInt(0) || pos.entryPrice === 0) {
       mintAddresses.push(pos.mintAddress);
       posArray.push(pos);
     }
@@ -423,6 +439,7 @@ export async function runMonitorTick(
       // 7. Update in-memory state
       pos.remainingTokens -= action.sellTokens;
       pos.currentStage = action.stage;
+      pos.consecutiveFailures = 0; // Reset on successful sell
 
       // If no tokens left, mark as completed
       if (pos.remainingTokens <= BigInt(0)) {
@@ -474,8 +491,9 @@ export async function runMonitorTick(
         }),
       );
     } catch (err) {
+      pos.consecutiveFailures++;
       log.error(
-        { tokenId: pos.tokenId, stage: action.stage, err },
+        { tokenId: pos.tokenId, stage: action.stage, failures: pos.consecutiveFailures, err },
         "Exit execution failed",
       );
 
