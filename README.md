@@ -2,6 +2,8 @@
 
 > End-to-end automation pipeline that detects real-time trends from X.com (Twitter), scores meme coin potential with AI, auto-launches tokens on pump.fun, and realizes profit through staged sells.
 
+![Dashboard](docs/dashboard.png)
+
 ## Architecture
 
 ```
@@ -39,7 +41,8 @@ flash-pump-engine/
 │   ├── trend-detector/    # X.com trend scraping + AI scoring
 │   ├── token-launcher/    # pump.fun token deploy + Jito bundling
 │   ├── exit-manager/      # Position monitoring + 3-stage exit
-│   └── telegram-bot/      # Alerts + dashboard commands
+│   ├── telegram-bot/      # Alerts + dashboard commands
+│   └── dashboard/         # Hono + htmx web dashboard
 ├── scripts/               # Wallet setup, fund distribution, collection
 ├── python/x-scraper/      # Playwright-based X.com scraper
 └── docker-compose.yml
@@ -91,6 +94,9 @@ pnpm --filter @flash-pump/exit-manager start
 
 # Telegram bot — alerts + commands
 pnpm --filter @flash-pump/telegram-bot start
+
+# Dashboard — web UI on http://localhost:3000
+pnpm --filter @flash-pump/dashboard start
 ```
 
 ## Modules
@@ -113,6 +119,20 @@ Monitors all active positions via Helius WebSocket. Executes a 3-stage exit stra
 | 2 — Profit | Bonding 70%+ or Raydium imminent | Sell 50% of remaining |
 | 3 — Cleanup | Post-Raydium peak or -30% trailing stop | Sell all remaining |
 | Emergency | -50% from entry or 12h zero volume | Sell everything |
+
+### Dashboard
+
+Lightweight web dashboard built with Hono + htmx + Tailwind CSS. Password-protected with cookie sessions.
+
+- **Dashboard** — Master/sub wallet balances (live RPC), today's launches, P&L summary, active token list
+- **Tokens** — Full token list with status filters, bonding curve progress from chain, trade history, pump.fun/Solscan links
+- **Wallets** — Wallet pool balances, fund flow (buy/sell history)
+- Auto-refresh via htmx polling (10–15s intervals)
+
+```env
+DASHBOARD_PASSWORD=your_password        # optional — skip to disable auth
+DASHBOARD_COOKIE_SECRET=min-16-chars    # cookie signing secret
+```
 
 ### Telegram Bot
 
@@ -142,6 +162,7 @@ See [`.env.example`](.env.example) for all required values. Grouped by service:
 | Database | `DATABASE_URL`, `REDIS_URL` |
 | Telegram | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` |
 | pump.fun | `PUMPFUN_PROGRAM_ID` |
+| Dashboard | `DASHBOARD_PASSWORD`, `DASHBOARD_COOKIE_SECRET` |
 | Config | `TREND_SCORE_THRESHOLD`, `INITIAL_BUY_SOL`, `MAX_DAILY_LAUNCHES`, etc. |
 
 ## Database
